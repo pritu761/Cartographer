@@ -252,7 +252,7 @@ export default function HomePage() {
   const unresolvedList = coverage ? coverage.unresolvedImports : [];
 
   return (
-    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-canvas)]">
+    <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-canvas)]" suppressHydrationWarning>
       {/* Top Application Bar */}
       <TopBar
         targetPath={targetPath}

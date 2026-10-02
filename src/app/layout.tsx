@@ -32,7 +32,7 @@ export default function RootLayout({
           }}
         />
       </head>
-      <body className="antialiased select-none">{children}</body>
+      <body className="antialiased select-none" suppressHydrationWarning>{children}</body>
     </html>
   );
 }
