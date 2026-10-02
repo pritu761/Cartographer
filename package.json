@@ -12,6 +12,8 @@
     "test:parser": "tsx src/parser/cli.ts"
   },
   "dependencies": {
+    "@clerk/nextjs": "^7.9.10",
+    "@supabase/supabase-js": "^2.117.2",
     "@tailwindcss/postcss": "4.3.3",
     "@xyflow/react": "12.12.0",
     "clsx": "2.1.1",

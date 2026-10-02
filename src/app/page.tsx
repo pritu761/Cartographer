@@ -8,6 +8,7 @@ import { RightInspector } from "@/components/RightInspector";
 import type { CoverageReport, DependencyEdge, ParsedFile } from "@/parser/types";
 import { classifyAllFiles } from "@/adapters";
 import { groupFilesIntoFolders } from "@/graph/folders";
+import type { StoredRepository } from "@/lib/supabase/client";
 
 export default function HomePage() {
   const [targetPath, setTargetPath] = useState("fixtures/sample-app");
@@ -21,6 +22,43 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [foldedFolderIds, setFoldedFolderIds] = useState<Set<string>>(new Set());
 
+  // Organization state
+  const [currentOrgId, setCurrentOrgId] = useState("org_demo_local");
+  const [savedRepos, setSavedRepos] = useState<StoredRepository[]>([]);
+
+  useEffect(() => {
+    const saved = localStorage.getItem("cartograph_org");
+    if (saved) {
+      setCurrentOrgId(saved);
+    }
+  }, []);
+
+  const handleOrgChange = useCallback((newOrg: string) => {
+    setCurrentOrgId(newOrg);
+    localStorage.setItem("cartograph_org", newOrg);
+  }, []);
+
+  // Fetch saved repositories for active organization
+  const fetchOrgRepos = useCallback(async () => {
+    try {
+      const res = await fetch("/api/org/repositories", {
+        headers: { "x-cartograph-org-id": currentOrgId },
+      });
+      const data = await res.json();
+      if (data.success && Array.isArray(data.repositories)) {
+        setSavedRepos(data.repositories);
+      } else {
+        setSavedRepos([]);
+      }
+    } catch {
+      setSavedRepos([]);
+    }
+  }, [currentOrgId]);
+
+  useEffect(() => {
+    fetchOrgRepos();
+  }, [fetchOrgRepos]);
+
   const handleParse = useCallback(
     async (pathOverride?: string) => {
       const pathToUse = pathOverride !== undefined ? pathOverride : targetPath;
@@ -31,7 +69,10 @@ export default function HomePage() {
       try {
         const res = await fetch("/api/parse/stream", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: {
+            "Content-Type": "application/json",
+            "x-cartograph-org-id": currentOrgId,
+          },
           body: JSON.stringify({ input: pathToUse }),
         });
 
@@ -68,7 +109,7 @@ export default function HomePage() {
                   setEdges(data.edges);
                   setCoverage(data.coverage);
                   setMetrics(data.metrics);
-                  setFoldedFolderIds(new Set()); // Reset folder folding on new repo
+                  setFoldedFolderIds(new Set());
 
                   if (data.files.length > 0) {
                     const currentExists = data.files.some(
@@ -98,7 +139,7 @@ export default function HomePage() {
         setProgressMessage(null);
       }
     },
-    [targetPath, selectedFileId]
+    [targetPath, selectedFileId, currentOrgId]
   );
 
   // Automatically parse sample app on initial mount
@@ -106,10 +147,76 @@ export default function HomePage() {
     handleParse("fixtures/sample-app");
   }, [handleParse]);
 
-  // Framework adapter classification: pure computation outside parser
+  // Save current analysis to active organization
+  const handleSaveAnalysis = useCallback(async () => {
+    if (files.length === 0) return;
+
+    const parts = targetPath.split("/");
+    const repoName = parts[parts.length - 1] || targetPath;
+    const owner = parts.length > 1 ? parts[0] : "local";
+
+    const res = await fetch("/api/org/repositories", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-cartograph-org-id": currentOrgId,
+      },
+      body: JSON.stringify({
+        repo: {
+          url: targetPath,
+          owner,
+          name: repoName,
+        },
+        analysis: {
+          filesCount: files.length,
+          edgesCount: edges.length,
+          summaryJson: {
+            files,
+            edges,
+            coverage,
+            metrics,
+          },
+        },
+      }),
+    });
+
+    const json = await res.json();
+    if (!res.ok || !json.success) {
+      throw new Error(json.error || "Failed to save analysis.");
+    }
+
+    await fetchOrgRepos();
+  }, [files, edges, coverage, metrics, targetPath, currentOrgId, fetchOrgRepos]);
+
+  // Select a previously saved repository
+  const handleSelectSavedRepo = useCallback(
+    (repo: StoredRepository & { latestAnalysis?: { summary_json: Record<string, unknown> } }) => {
+      if (repo.latestAnalysis?.summary_json) {
+        const snap = repo.latestAnalysis.summary_json as {
+          files?: ParsedFile[];
+          edges?: DependencyEdge[];
+          coverage?: CoverageReport;
+          metrics?: Record<string, { fanIn: number; fanOut: number }>;
+        };
+
+        setTargetPath(repo.url);
+        if (snap.files) setFiles(snap.files);
+        if (snap.edges) setEdges(snap.edges);
+        if (snap.coverage) setCoverage(snap.coverage);
+        if (snap.metrics) setMetrics(snap.metrics);
+        if (snap.files && snap.files.length > 0) setSelectedFileId(snap.files[0].path);
+      } else {
+        setTargetPath(repo.url);
+        handleParse(repo.url);
+      }
+    },
+    [handleParse]
+  );
+
+  // Framework adapter classification
   const classifications = useMemo(() => classifyAllFiles(files), [files]);
 
-  // Folder grouping: pure calculation over files
+  // Folder grouping
   const folders = useMemo(() => groupFilesIntoFolders(files), [files]);
 
   const toggleFoldFolder = useCallback((folderId: string) => {
@@ -149,6 +256,12 @@ export default function HomePage() {
         onParse={() => handleParse()}
         isLoading={isLoading}
         progressMessage={progressMessage}
+        currentOrgId={currentOrgId}
+        onOrgChange={handleOrgChange}
+        canSave={files.length > 0}
+        onSaveAnalysis={handleSaveAnalysis}
+        savedRepos={savedRepos}
+        onSelectSavedRepo={handleSelectSavedRepo}
       />
 
       {/* Error alert banner if any */}

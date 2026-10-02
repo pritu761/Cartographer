@@ -2,6 +2,8 @@
 
 import { FolderCode, Play, Loader2, GitBranch } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
+import { OrgSelector } from "./OrgSelector";
+import type { StoredRepository } from "@/lib/supabase/client";
 
 interface TopBarProps {
   targetPath: string;
@@ -9,6 +11,12 @@ interface TopBarProps {
   onParse: () => void;
   isLoading: boolean;
   progressMessage: string | null;
+  currentOrgId: string;
+  onOrgChange: (orgId: string) => void;
+  canSave: boolean;
+  onSaveAnalysis: () => Promise<void>;
+  savedRepos: StoredRepository[];
+  onSelectSavedRepo: (repo: StoredRepository) => void;
 }
 
 export function TopBar({
@@ -17,6 +25,12 @@ export function TopBar({
   onParse,
   isLoading,
   progressMessage,
+  currentOrgId,
+  onOrgChange,
+  canSave,
+  onSaveAnalysis,
+  savedRepos,
+  onSelectSavedRepo,
 }: TopBarProps) {
   return (
     <header className="flex h-12 w-full items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] px-4 shrink-0">
@@ -27,7 +41,7 @@ export function TopBar({
             CARTOGRAPH
           </span>
           <span className="rounded bg-[var(--bg-panel-subtle)] border border-[var(--border-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">
-            phase-03
+            phase-04
           </span>
         </div>
 
@@ -104,6 +118,15 @@ export function TopBar({
       </div>
 
       <div className="flex items-center gap-3">
+        <OrgSelector
+          currentOrgId={currentOrgId}
+          onOrgChange={onOrgChange}
+          canSave={canSave}
+          onSaveAnalysis={onSaveAnalysis}
+          savedRepos={savedRepos}
+          onSelectSavedRepo={onSelectSavedRepo}
+        />
+        <div className="h-4 w-[1px] bg-[var(--border-subtle)]" />
         <ThemeToggle />
       </div>
     </header>
