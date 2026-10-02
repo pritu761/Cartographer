@@ -13,6 +13,7 @@ import { groupFilesIntoFolders } from "@/graph/folders";
 import type { StoredRepository } from "@/lib/supabase/client";
 
 export default function HomePage() {
+  const [mounted, setMounted] = useState(false);
   const [targetPath, setTargetPath] = useState("fixtures/sample-app");
   const [files, setFiles] = useState<ParsedFile[]>([]);
   const [edges, setEdges] = useState<DependencyEdge[]>([]);
@@ -31,6 +32,7 @@ export default function HomePage() {
   const [savedRepos, setSavedRepos] = useState<StoredRepository[]>([]);
 
   useEffect(() => {
+    setMounted(true);
     const saved = localStorage.getItem("cartograph_org");
     if (saved) {
       setCurrentOrgId(saved);
@@ -250,6 +252,19 @@ export default function HomePage() {
     ? classifications.get(selectedFileId) || null
     : null;
   const unresolvedList = coverage ? coverage.unresolvedImports : [];
+
+  if (!mounted) {
+    return (
+      <div
+        className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-canvas)] items-center justify-center"
+        suppressHydrationWarning
+      >
+        <div className="font-mono text-xs text-[var(--text-muted)] animate-pulse">
+          Loading Cartograph...
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-screen w-screen flex-col overflow-hidden bg-[var(--bg-canvas)]" suppressHydrationWarning>
