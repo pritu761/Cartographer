@@ -6,6 +6,7 @@ import { LeftPanel } from "@/components/LeftPanel";
 import { CenterCanvas } from "@/components/CenterCanvas";
 import { RightInspector } from "@/components/RightInspector";
 import { ChatPanel } from "@/components/ChatPanel";
+import { AuditModal } from "@/components/AuditModal";
 import type { CoverageReport, DependencyEdge, ParsedFile } from "@/parser/types";
 import { classifyAllFiles } from "@/adapters";
 import { groupFilesIntoFolders } from "@/graph/folders";
@@ -23,6 +24,7 @@ export default function HomePage() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [foldedFolderIds, setFoldedFolderIds] = useState<Set<string>>(new Set());
   const [isChatOpen, setIsChatOpen] = useState(false);
+  const [isAuditOpen, setIsAuditOpen] = useState(false);
 
   // Organization state
   const [currentOrgId, setCurrentOrgId] = useState("org_demo_local");
@@ -266,6 +268,7 @@ export default function HomePage() {
         onSelectSavedRepo={handleSelectSavedRepo}
         isChatOpen={isChatOpen}
         onToggleChat={() => setIsChatOpen(!isChatOpen)}
+        onOpenAudit={() => setIsAuditOpen(true)}
       />
 
       {/* Error alert banner if any */}
@@ -335,6 +338,12 @@ export default function HomePage() {
         onSelectFile={setSelectedFileId}
         isOpen={isChatOpen}
         onClose={() => setIsChatOpen(false)}
+      />
+
+      {/* Ship Criteria Quality Gate Modal */}
+      <AuditModal
+        isOpen={isAuditOpen}
+        onClose={() => setIsAuditOpen(false)}
       />
     </div>
   );

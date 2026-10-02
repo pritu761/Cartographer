@@ -10,7 +10,8 @@
     "lint": "eslint src",
     "typecheck": "tsc --noEmit",
     "test:parser": "tsx src/parser/cli.ts",
-    "test:ground-truth": "tsx src/lib/ai/verify-ground-truth.test.ts"
+    "test:ground-truth": "tsx src/lib/ai/verify-ground-truth.test.ts",
+    "test:audit": "tsx scripts/audit-ship-criteria.ts"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.9.10",

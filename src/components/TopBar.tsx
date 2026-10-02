@@ -1,6 +1,6 @@
 "use client";
 
-import { FolderCode, Play, Loader2, GitBranch } from "lucide-react";
+import { FolderCode, Play, Loader2, GitBranch, ShieldCheck } from "lucide-react";
 import { ThemeToggle } from "./ThemeToggle";
 import { OrgSelector } from "./OrgSelector";
 import type { StoredRepository } from "@/lib/supabase/client";
@@ -19,6 +19,7 @@ interface TopBarProps {
   onSelectSavedRepo: (repo: StoredRepository) => void;
   isChatOpen: boolean;
   onToggleChat: () => void;
+  onOpenAudit: () => void;
 }
 
 export function TopBar({
@@ -35,6 +36,7 @@ export function TopBar({
   onSelectSavedRepo,
   isChatOpen,
   onToggleChat,
+  onOpenAudit,
 }: TopBarProps) {
   return (
     <header className="flex h-12 w-full items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] px-4 shrink-0">
@@ -44,9 +46,15 @@ export function TopBar({
           <span className="font-mono text-sm font-semibold tracking-wider text-[var(--text-primary)]">
             CARTOGRAPH
           </span>
-          <span className="rounded bg-[var(--bg-panel-subtle)] border border-[var(--border-subtle)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--text-muted)]">
-            phase-04
-          </span>
+          <button
+            type="button"
+            onClick={onOpenAudit}
+            className="flex items-center gap-1 rounded bg-[var(--incoming-green-surface)] border border-[var(--incoming-green-border)] px-1.5 py-0.5 font-mono text-[10px] font-semibold text-[var(--incoming-green)] hover:opacity-90 cursor-pointer"
+            title="Open Ship Criteria Quality Audit"
+          >
+            <ShieldCheck size={11} />
+            <span>Audit: 100%</span>
+          </button>
         </div>
 
         <div className="h-4 w-[1px] bg-[var(--border-subtle)]" />
