@@ -1,11 +1,13 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { TopBar } from "@/components/TopBar";
 import { LeftPanel } from "@/components/LeftPanel";
 import { CenterCanvas } from "@/components/CenterCanvas";
 import { RightInspector } from "@/components/RightInspector";
 import type { CoverageReport, DependencyEdge, ParsedFile } from "@/parser/types";
+import { classifyAllFiles } from "@/adapters";
+import { groupFilesIntoFolders } from "@/graph/folders";
 
 export default function HomePage() {
   const [targetPath, setTargetPath] = useState("fixtures/sample-app");
@@ -16,6 +18,7 @@ export default function HomePage() {
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [foldedFolderIds, setFoldedFolderIds] = useState<Set<string>>(new Set());
 
   const handleParse = useCallback(
     async (pathOverride?: string) => {
@@ -40,6 +43,7 @@ export default function HomePage() {
         setEdges(data.edges);
         setCoverage(data.coverage);
         setMetrics(data.metrics);
+        setFoldedFolderIds(new Set()); // Reset folder folding on new parse
 
         // Select the first file by default if none selected or previous selection no longer exists
         if (data.files.length > 0) {
@@ -64,7 +68,38 @@ export default function HomePage() {
     handleParse("fixtures/sample-app");
   }, [handleParse]);
 
+  // Framework adapter classification: pure computation outside parser
+  const classifications = useMemo(() => classifyAllFiles(files), [files]);
+
+  // Folder grouping: pure calculation over files
+  const folders = useMemo(() => groupFilesIntoFolders(files), [files]);
+
+  const toggleFoldFolder = useCallback((folderId: string) => {
+    setFoldedFolderIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(folderId)) {
+        next.delete(folderId);
+      } else {
+        next.add(folderId);
+      }
+      return next;
+    });
+  }, []);
+
+  const foldAllFolders = useCallback(() => {
+    const all = new Set<string>();
+    folders.forEach((_, id) => all.add(id));
+    setFoldedFolderIds(all);
+  }, [folders]);
+
+  const unfoldAllFolders = useCallback(() => {
+    setFoldedFolderIds(new Set());
+  }, []);
+
   const selectedFile = files.find((f) => f.path === selectedFileId) || null;
+  const selectedClassification = selectedFileId
+    ? classifications.get(selectedFileId) || null
+    : null;
   const unresolvedList = coverage ? coverage.unresolvedImports : [];
 
   return (
@@ -96,15 +131,20 @@ export default function HomePage() {
         <LeftPanel
           files={files}
           metrics={metrics}
+          classifications={classifications}
           selectedFileId={selectedFileId}
           onSelectFile={setSelectedFileId}
           coverage={coverage}
+          folders={folders}
+          foldedFolderIds={foldedFolderIds}
+          onToggleFold={toggleFoldFolder}
         />
 
         <CenterCanvas
           files={files}
           edges={edges}
           metrics={metrics}
+          classifications={classifications}
           selectedFileId={selectedFileId}
           onSelectFile={setSelectedFileId}
           onParseSample={() => {
@@ -112,12 +152,18 @@ export default function HomePage() {
             handleParse("fixtures/sample-app");
           }}
           isLoading={isLoading}
+          folders={folders}
+          foldedFolderIds={foldedFolderIds}
+          onToggleFold={toggleFoldFolder}
+          onFoldAll={foldAllFolders}
+          onUnfoldAll={unfoldAllFolders}
         />
 
         <RightInspector
           selectedFile={selectedFile}
           edges={edges}
           unresolvedImports={unresolvedList}
+          classification={selectedClassification}
           onSelectFile={setSelectedFileId}
         />
       </div>

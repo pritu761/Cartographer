@@ -17,50 +17,84 @@ import {
 } from "@xyflow/react";
 import "@xyflow/react/dist/style.css";
 import dagre from "dagre";
-import { Network, Play } from "lucide-react";
+import {
+  Network,
+  Play,
+  FolderClosed,
+  ChevronRight,
+  ChevronDown,
+} from "lucide-react";
 import type { DependencyEdge, ParsedFile } from "@/parser/types";
+import type { FileClassification } from "@/adapters/types";
+import { KIND_COLOR_STYLES } from "@/adapters";
+import {
+  type FolderGroup,
+  rollUpEdges,
+  getVisualNodeIdForFile,
+} from "@/graph/folders";
+import { calculateBlastRadius, calculateDependencyChain } from "@/graph/blast-radius";
 
 interface CenterCanvasProps {
   files: ParsedFile[];
   edges: DependencyEdge[];
   metrics: Record<string, { fanIn: number; fanOut: number }>;
+  classifications: Map<string, FileClassification>;
   selectedFileId: string | null;
   onSelectFile: (fileId: string) => void;
   onParseSample: () => void;
   isLoading: boolean;
+  folders: Map<string, FolderGroup>;
+  foldedFolderIds: Set<string>;
+  onToggleFold: (folderId: string) => void;
+  onFoldAll: () => void;
+  onUnfoldAll: () => void;
 }
 
-interface CustomNodeData {
+interface CustomFileNodeData {
   label: string;
   fanIn: number;
   fanOut: number;
+  classification?: FileClassification;
   isSelected: boolean;
+  isInBlastRadius: boolean;
+  isInDepChain: boolean;
   [key: string]: unknown;
 }
 
-// Custom file node matching dense developer aesthetic
-function FileNodeComponent({ data }: NodeProps<Node<CustomNodeData>>) {
-  const { label, fanIn, fanOut, isSelected } = data;
+interface CustomFolderNodeData {
+  folderId: string;
+  folderPath: string;
+  filesCount: number;
+  onToggleFold: (id: string) => void;
+  [key: string]: unknown;
+}
+
+// Custom file node
+function FileNodeComponent({ data }: NodeProps<Node<CustomFileNodeData>>) {
+  const { label, fanIn, fanOut, classification, isSelected, isInBlastRadius, isInDepChain } = data;
+  const kindStyle = classification ? KIND_COLOR_STYLES[classification.kind] : KIND_COLOR_STYLES.generic;
+
+  let ringClass = "border-[var(--border-strong)] bg-[var(--bg-panel)]";
+  if (isSelected) {
+    ringClass = "border-[var(--accent-blue)] bg-[var(--accent-blue-surface)] ring-2 ring-[var(--accent-blue)]";
+  } else if (isInBlastRadius) {
+    ringClass = "border-rose-500 bg-rose-500/5 ring-1 ring-rose-500/50";
+  } else if (isInDepChain) {
+    ringClass = "border-[var(--outgoing-amber)] bg-[var(--outgoing-amber-surface)] ring-1 ring-[var(--outgoing-amber)]/50";
+  }
 
   return (
     <div
-      className={`rounded border px-2.5 py-1.5 shadow-xs transition-colors cursor-pointer min-w-[180px] max-w-[260px] ${
-        isSelected
-          ? "border-[var(--accent-blue)] bg-[var(--accent-blue-surface)] ring-1 ring-[var(--accent-blue)]"
-          : "border-[var(--border-strong)] bg-[var(--bg-panel)] hover:border-[var(--accent-blue)]"
-      }`}
+      className={`rounded border px-2.5 py-1.5 shadow-xs transition-all cursor-pointer min-w-[190px] max-w-[270px] ${ringClass}`}
     >
       <Handle type="target" position={Position.Left} className="!w-2 !h-2 !bg-[var(--border-strong)]" />
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-center justify-between gap-1 mb-1">
         <span
-          className={`font-mono text-xs truncate ${
-            isSelected ? "font-semibold text-[var(--accent-blue)]" : "text-[var(--text-primary)]"
-          }`}
-          title={label}
+          className={`rounded px-1 py-0.2 font-mono text-[9px] font-semibold border ${kindStyle.bg} ${kindStyle.text} ${kindStyle.border}`}
         >
-          {label}
+          {kindStyle.label}
         </span>
-        <div className="flex items-center gap-1 shrink-0 font-mono text-[9px]">
+        <div className="flex items-center gap-1 font-mono text-[9px]">
           <span className="rounded bg-[var(--incoming-green-surface)] text-[var(--incoming-green)] px-1 border border-[var(--incoming-green-border)]">
             +{fanIn}
           </span>
@@ -69,28 +103,84 @@ function FileNodeComponent({ data }: NodeProps<Node<CustomNodeData>>) {
           </span>
         </div>
       </div>
+      <div
+        className={`font-mono text-xs truncate ${
+          isSelected ? "font-semibold text-[var(--accent-blue)]" : "text-[var(--text-primary)]"
+        }`}
+        title={label}
+      >
+        {label}
+      </div>
       <Handle type="source" position={Position.Right} className="!w-2 !h-2 !bg-[var(--border-strong)]" />
+    </div>
+  );
+}
+
+// Custom folded folder container node
+function FolderNodeComponent({ data }: NodeProps<Node<CustomFolderNodeData>>) {
+  const { folderId, folderPath, filesCount, onToggleFold } = data;
+
+  return (
+    <div className="rounded border-2 border-dashed border-[var(--outgoing-amber)] bg-[var(--outgoing-amber-surface)]/80 p-2.5 shadow-xs cursor-pointer min-w-[220px]">
+      <Handle type="target" position={Position.Left} className="!w-2.5 !h-2.5 !bg-[var(--outgoing-amber)]" />
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 truncate">
+          <FolderClosed size={15} className="text-[var(--outgoing-amber)] shrink-0" />
+          <span className="font-mono text-xs font-semibold text-[var(--text-primary)] truncate" title={folderPath}>
+            {folderPath}/
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleFold(folderId);
+          }}
+          className="rounded border border-[var(--outgoing-amber-border)] bg-[var(--bg-panel)] px-1.5 py-0.5 font-mono text-[10px] text-[var(--outgoing-amber)] hover:bg-[var(--outgoing-amber-surface)]"
+        >
+          Expand ({filesCount})
+        </button>
+      </div>
+      <Handle type="source" position={Position.Right} className="!w-2.5 !h-2.5 !bg-[var(--outgoing-amber)]" />
     </div>
   );
 }
 
 const nodeTypes = {
   fileNode: FileNodeComponent,
+  folderNode: FolderNodeComponent,
 };
 
 export function CenterCanvas({
   files,
   edges,
   metrics,
+  classifications,
   selectedFileId,
   onSelectFile,
   onParseSample,
   isLoading,
+  folders,
+  foldedFolderIds,
+  onToggleFold,
+  onFoldAll,
+  onUnfoldAll,
 }: CenterCanvasProps) {
-  const [nodes, setNodes, onNodesChange] = useNodesState<Node<CustomNodeData>>([]);
+  const [nodes, setNodes, onNodesChange] = useNodesState<Node<CustomFileNodeData | CustomFolderNodeData>>([]);
   const [flowEdges, setFlowEdges, onEdgesChange] = useEdgesState<Edge>([]);
 
-  // Calculate layout with dagre whenever files or edges change
+  // Compute blast radius and dependency chain for active selection
+  const blastRadius = selectedFileId
+    ? calculateBlastRadius(selectedFileId, edges)
+    : { level1: [], level2: [], transitive: [], distances: {} };
+  const depChain = selectedFileId
+    ? calculateDependencyChain(selectedFileId, edges)
+    : { level1: [], level2: [], transitive: [], distances: {} };
+
+  const blastSet = new Set(blastRadius.transitive);
+  const depSet = new Set(depChain.transitive);
+
+  // Recalculate layout with dagre when files, folded folders, or edges change
   useEffect(() => {
     if (files.length === 0) {
       setNodes([]);
@@ -100,32 +190,73 @@ export function CenterCanvas({
 
     const dagreGraph = new dagre.graphlib.Graph();
     dagreGraph.setDefaultEdgeLabel(() => ({}));
-    dagreGraph.setGraph({ rankdir: "LR", nodesep: 35, ranksep: 80 });
+    dagreGraph.setGraph({ rankdir: "LR", nodesep: 35, ranksep: 90 });
 
-    const rawNodes: Node<CustomNodeData>[] = files.map((file) => {
-      const fileMetric = metrics[file.path] || { fanIn: 0, fanOut: 0 };
-      const isSelected = file.path === selectedFileId;
+    const rawNodes: Node<CustomFileNodeData | CustomFolderNodeData>[] = [];
+    const addedNodeIds = new Set<string>();
 
-      return {
-        id: file.path,
-        type: "fileNode",
-        position: { x: 0, y: 0 },
-        data: {
-          label: file.path,
-          fanIn: fileMetric.fanIn,
-          fanOut: fileMetric.fanOut,
-          isSelected,
-        },
-      };
+    // 1. Add folder nodes for folded folders
+    folders.forEach((folder) => {
+      if (foldedFolderIds.has(folder.id)) {
+        if (!addedNodeIds.has(folder.id)) {
+          addedNodeIds.add(folder.id);
+          rawNodes.push({
+            id: folder.id,
+            type: "folderNode",
+            position: { x: 0, y: 0 },
+            data: {
+              folderId: folder.id,
+              folderPath: folder.path,
+              filesCount: folder.files.length,
+              onToggleFold,
+            },
+          });
+          dagreGraph.setNode(folder.id, { width: 230, height: 48 });
+        }
+      }
     });
 
-    rawNodes.forEach((node) => {
-      dagreGraph.setNode(node.id, { width: 220, height: 44 });
-    });
+    // 2. Add individual file nodes for files that are not hidden inside folded folders
+    for (const file of files) {
+      const visualId = getVisualNodeIdForFile(file.path, foldedFolderIds);
+      if (visualId === file.path) {
+        if (!addedNodeIds.has(file.path)) {
+          addedNodeIds.add(file.path);
+          const fileMetric = metrics[file.path] || { fanIn: 0, fanOut: 0 };
+          const isSelected = file.path === selectedFileId;
+          const isInBlastRadius = blastSet.has(file.path);
+          const isInDepChain = depSet.has(file.path);
 
-    const rawEdges: Edge[] = edges.map((e, index) => {
-      const isIncoming = selectedFileId && e.to === selectedFileId;
-      const isOutgoing = selectedFileId && e.from === selectedFileId;
+          rawNodes.push({
+            id: file.path,
+            type: "fileNode",
+            position: { x: 0, y: 0 },
+            data: {
+              label: file.path,
+              fanIn: fileMetric.fanIn,
+              fanOut: fileMetric.fanOut,
+              classification: classifications.get(file.path),
+              isSelected,
+              isInBlastRadius,
+              isInDepChain,
+            },
+          });
+          dagreGraph.setNode(file.path, { width: 230, height: 56 });
+        }
+      }
+    }
+
+    // 3. Roll up edges based on folded folders
+    const rolledEdges = rollUpEdges(edges, foldedFolderIds);
+    const rawEdges: Edge[] = [];
+
+    for (const rEdge of rolledEdges) {
+      if (!addedNodeIds.has(rEdge.source) || !addedNodeIds.has(rEdge.target)) {
+        continue;
+      }
+
+      const isIncoming = selectedFileId && rEdge.target === selectedFileId;
+      const isOutgoing = selectedFileId && rEdge.source === selectedFileId;
 
       let strokeColor = "var(--border-strong)";
       let strokeWidth = 1.2;
@@ -138,12 +269,22 @@ export function CenterCanvas({
         strokeWidth = 2;
       }
 
-      return {
-        id: `e-${index}-${e.from}-${e.to}`,
-        source: e.from,
-        target: e.to,
+      rawEdges.push({
+        id: rEdge.id,
+        source: rEdge.source,
+        target: rEdge.target,
         type: "smoothstep",
         animated: false,
+        label: rEdge.count > 1 ? `${rEdge.count} imports` : undefined,
+        labelStyle: {
+          fontFamily: "monospace",
+          fontSize: 9,
+          fill: "var(--text-muted)",
+        },
+        labelBgStyle: {
+          fill: "var(--bg-panel)",
+          stroke: "var(--border-subtle)",
+        },
         style: {
           stroke: strokeColor,
           strokeWidth,
@@ -154,12 +295,10 @@ export function CenterCanvas({
           width: 14,
           height: 14,
         },
-      };
-    });
+      });
 
-    rawEdges.forEach((edge) => {
-      dagreGraph.setEdge(edge.source, edge.target);
-    });
+      dagreGraph.setEdge(rEdge.source, rEdge.target);
+    }
 
     dagre.layout(dagreGraph);
 
@@ -168,15 +307,26 @@ export function CenterCanvas({
       return {
         ...node,
         position: {
-          x: (nodePos?.x || 0) - 110,
-          y: (nodePos?.y || 0) - 22,
+          x: (nodePos?.x || 0) - 115,
+          y: (nodePos?.y || 0) - 24,
         },
       };
     });
 
     setNodes(layoutedNodes);
     setFlowEdges(rawEdges);
-  }, [files, edges, metrics, selectedFileId, setNodes, setFlowEdges]);
+  }, [
+    files,
+    edges,
+    metrics,
+    classifications,
+    selectedFileId,
+    folders,
+    foldedFolderIds,
+    setNodes,
+    setFlowEdges,
+    onToggleFold,
+  ]);
 
   if (files.length === 0 && !isLoading) {
     return (
@@ -204,13 +354,40 @@ export function CenterCanvas({
 
   return (
     <main className="relative flex-1 h-full bg-[var(--bg-canvas)] overflow-hidden">
+      {/* Top canvas controls bar */}
+      <div className="absolute top-3 left-3 z-10 flex items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--bg-panel)] px-2.5 py-1.5 shadow-xs font-mono text-xs">
+        <span className="text-[var(--text-muted)] text-[11px] mr-1">Folders:</span>
+        <button
+          type="button"
+          onClick={onFoldAll}
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium border border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] text-[var(--text-primary)] hover:bg-[var(--bg-panel)]"
+        >
+          <ChevronRight size={12} />
+          <span>Fold All</span>
+        </button>
+        <button
+          type="button"
+          onClick={onUnfoldAll}
+          className="flex items-center gap-1 rounded px-2 py-0.5 text-[11px] font-medium border border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] text-[var(--text-primary)] hover:bg-[var(--bg-panel)]"
+        >
+          <ChevronDown size={12} />
+          <span>Unfold All</span>
+        </button>
+      </div>
+
       <ReactFlow
         nodes={nodes}
         edges={flowEdges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        onNodeClick={(_, node) => onSelectFile(node.id)}
+        onNodeClick={(_, node) => {
+          if (node.type === "fileNode") {
+            onSelectFile(node.id);
+          } else if (node.type === "folderNode") {
+            onToggleFold(node.id);
+          }
+        }}
         fitView
         fitViewOptions={{ padding: 0.2 }}
         minZoom={0.2}
@@ -242,7 +419,11 @@ export function CenterCanvas({
         </div>
         <div className="flex items-center gap-1.5">
           <div className="h-2 w-2 rounded-full bg-[var(--accent-blue)]" />
-          <span className="text-[var(--text-secondary)]">Selected File</span>
+          <span className="text-[var(--text-secondary)]">Selected</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="h-2 w-2 rounded-full bg-rose-500" />
+          <span className="text-[var(--text-secondary)]">Blast Radius</span>
         </div>
       </div>
     </main>
