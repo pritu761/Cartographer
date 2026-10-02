@@ -17,6 +17,7 @@ export default function HomePage() {
   const [metrics, setMetrics] = useState<Record<string, { fanIn: number; fanOut: number }>>({});
   const [selectedFileId, setSelectedFileId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [foldedFolderIds, setFoldedFolderIds] = useState<Set<string>>(new Set());
 
@@ -25,39 +26,76 @@ export default function HomePage() {
       const pathToUse = pathOverride !== undefined ? pathOverride : targetPath;
       setIsLoading(true);
       setErrorMessage(null);
+      setProgressMessage("Initializing analysis...");
 
       try {
-        const res = await fetch("/api/parse", {
+        const res = await fetch("/api/parse/stream", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ targetPath: pathToUse }),
+          body: JSON.stringify({ input: pathToUse }),
         });
 
-        const json = await res.json();
-        if (!res.ok || !json.success) {
-          throw new Error(json.error || "Failed to parse target directory");
+        if (!res.ok) {
+          throw new Error(`Analysis request failed: ${res.statusText}`);
         }
 
-        const data = json.data;
-        setFiles(data.files);
-        setEdges(data.edges);
-        setCoverage(data.coverage);
-        setMetrics(data.metrics);
-        setFoldedFolderIds(new Set()); // Reset folder folding on new parse
+        const reader = res.body?.getReader();
+        if (!reader) {
+          throw new Error("Unable to establish streaming response.");
+        }
 
-        // Select the first file by default if none selected or previous selection no longer exists
-        if (data.files.length > 0) {
-          const currentExists = data.files.some((f: ParsedFile) => f.path === selectedFileId);
-          if (!currentExists) {
-            setSelectedFileId(data.files[0].path);
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n");
+          buffer = lines.pop() || "";
+
+          for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("data: ")) {
+              try {
+                const payload = JSON.parse(trimmed.slice(6));
+                if (payload.type === "progress") {
+                  setProgressMessage(payload.message);
+                } else if (payload.type === "complete") {
+                  const data = payload.data;
+                  setFiles(data.files);
+                  setEdges(data.edges);
+                  setCoverage(data.coverage);
+                  setMetrics(data.metrics);
+                  setFoldedFolderIds(new Set()); // Reset folder folding on new repo
+
+                  if (data.files.length > 0) {
+                    const currentExists = data.files.some(
+                      (f: ParsedFile) => f.path === selectedFileId
+                    );
+                    if (!currentExists) {
+                      setSelectedFileId(data.files[0].path);
+                    }
+                  } else {
+                    setSelectedFileId(null);
+                  }
+                } else if (payload.type === "error") {
+                  throw new Error(payload.error || "Analysis failed.");
+                }
+              } catch (parseErr) {
+                if (parseErr instanceof Error && parseErr.message !== "Unexpected end of JSON input") {
+                  throw parseErr;
+                }
+              }
+            }
           }
-        } else {
-          setSelectedFileId(null);
         }
       } catch (err) {
         setErrorMessage(err instanceof Error ? err.message : String(err));
       } finally {
         setIsLoading(false);
+        setProgressMessage(null);
       }
     },
     [targetPath, selectedFileId]
@@ -110,6 +148,7 @@ export default function HomePage() {
         onTargetPathChange={setTargetPath}
         onParse={() => handleParse()}
         isLoading={isLoading}
+        progressMessage={progressMessage}
       />
 
       {/* Error alert banner if any */}

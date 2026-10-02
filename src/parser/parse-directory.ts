@@ -54,12 +54,24 @@ const BINARY_EXTENSIONS = new Set([
   ".eot",
 ]);
 
+export interface ParseProgressEvent {
+  stage: "scanning" | "parsing" | "resolving";
+  current: number;
+  total: number;
+  message: string;
+}
+
+export type ParseProgressCallback = (event: ParseProgressEvent) => void;
+
 /**
  * Standalone parser engine.
  * Reads a directory, parses every supported file using AST, resolves dependencies,
  * and produces exact edges and a strict coverage report.
  */
-export async function parseDirectory(targetDirectory: string): Promise<ParseResult> {
+export async function parseDirectory(
+  targetDirectory: string,
+  onProgress?: ParseProgressCallback
+): Promise<ParseResult> {
   const rootPath = path.resolve(targetDirectory);
   if (!fs.existsSync(rootPath)) {
     throw new Error(`Target path does not exist: ${rootPath}`);
@@ -70,6 +82,13 @@ export async function parseDirectory(targetDirectory: string): Promise<ParseResu
     throw new Error(`Target path is not a directory: ${rootPath}`);
   }
 
+  onProgress?.({
+    stage: "scanning",
+    current: 0,
+    total: 0,
+    message: "Scanning directory tree...",
+  });
+
   const aliasConfig = loadPathAliases(rootPath);
   const project = createParserProject();
 
@@ -79,6 +98,9 @@ export async function parseDirectory(targetDirectory: string): Promise<ParseResu
   const unresolvedImports: UnresolvedImport[] = [];
   let totalEncounteredFiles = 0;
   let externalDependenciesCount = 0;
+
+  // File paths discovered for parsing
+  const codeFilesToParse: Array<{ fullPath: string; relativePath: string; ext: string }> = [];
 
   // 1. Recursive file collection
   function traverse(currentDir: string) {
@@ -126,26 +148,7 @@ export async function parseDirectory(targetDirectory: string): Promise<ParseResu
             message: `Non-code or unparsed file extension: ${ext || "(no ext)"}`,
           });
         } else {
-          // Candidate code file to parse
-          try {
-            const fileStat = fs.statSync(fullPath);
-            const sourceFile = project.addSourceFileAtPath(fullPath);
-            const rawImports = extractRawImports(sourceFile);
-
-            files.push({
-              id: relativePath,
-              path: relativePath,
-              extension: ext,
-              sizeBytes: fileStat.size,
-              rawImports,
-            });
-          } catch (parseErr) {
-            skippedFiles.push({
-              path: relativePath,
-              reason: "parse-error",
-              message: parseErr instanceof Error ? parseErr.message : String(parseErr),
-            });
-          }
+          codeFilesToParse.push({ fullPath, relativePath, ext });
         }
       }
     }
@@ -153,8 +156,49 @@ export async function parseDirectory(targetDirectory: string): Promise<ParseResu
 
   traverse(rootPath);
 
-  // 2. Resolve imports to strictly verified edges
-  // Track unique edges with a key: "from -> to [kind]"
+  // 2. Parse code files using AST
+  const totalCodeFiles = codeFilesToParse.length;
+  for (let i = 0; i < totalCodeFiles; i++) {
+    const { fullPath, relativePath, ext } = codeFilesToParse[i];
+
+    if (onProgress && (i % 5 === 0 || i === totalCodeFiles - 1)) {
+      onProgress({
+        stage: "parsing",
+        current: i + 1,
+        total: totalCodeFiles,
+        message: `Parsing AST: ${relativePath}`,
+      });
+    }
+
+    try {
+      const fileStat = fs.statSync(fullPath);
+      const sourceFile = project.addSourceFileAtPath(fullPath);
+      const rawImports = extractRawImports(sourceFile);
+
+      files.push({
+        id: relativePath,
+        path: relativePath,
+        extension: ext,
+        sizeBytes: fileStat.size,
+        rawImports,
+      });
+    } catch (parseErr) {
+      skippedFiles.push({
+        path: relativePath,
+        reason: "parse-error",
+        message: parseErr instanceof Error ? parseErr.message : String(parseErr),
+      });
+    }
+  }
+
+  // 3. Resolve imports to strictly verified edges
+  onProgress?.({
+    stage: "resolving",
+    current: 0,
+    total: files.length,
+    message: "Resolving dependency edges...",
+  });
+
   const edgeKeys = new Set<string>();
 
   for (const file of files) {
@@ -167,7 +211,6 @@ export async function parseDirectory(targetDirectory: string): Promise<ParseResu
       );
 
       if (resolution.status === "resolved" && resolution.resolvedRelativePath) {
-        // Enforce the rule: Never connect to yourself or invalid target
         const edgeKey = `${file.path}:::${resolution.resolvedRelativePath}:::${imp.kind}`;
         if (!edgeKeys.has(edgeKey)) {
           edgeKeys.add(edgeKey);
@@ -189,7 +232,6 @@ export async function parseDirectory(targetDirectory: string): Promise<ParseResu
           isExternal: true,
         });
       } else {
-        // Unresolved internal file reference
         unresolvedImports.push({
           file: file.path,
           specifier: imp.specifier,
