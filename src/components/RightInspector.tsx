@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import {
   FileText,
   ArrowDownLeft,
@@ -8,17 +9,25 @@ import {
   ShieldCheck,
   Flame,
   GitCommitHorizontal,
+  Sparkles,
+  CheckCircle2,
+  Database,
+  Loader2,
 } from "lucide-react";
 import type { DependencyEdge, ParsedFile, UnresolvedImport } from "@/parser/types";
 import { calculateBlastRadius, calculateDependencyChain } from "@/graph/blast-radius";
 import type { FileClassification } from "@/adapters/types";
 import { KIND_COLOR_STYLES } from "@/adapters";
+import type { ExplanationResponse } from "@/lib/ai/explanation-service";
 
 interface RightInspectorProps {
   selectedFile: ParsedFile | null;
   edges: DependencyEdge[];
   unresolvedImports: UnresolvedImport[];
   classification: FileClassification | null;
+  allFilePaths: string[];
+  repoUrl: string;
+  currentOrgId: string;
   onSelectFile: (filePath: string) => void;
 }
 
@@ -27,8 +36,15 @@ export function RightInspector({
   edges,
   unresolvedImports,
   classification,
+  allFilePaths,
+  repoUrl,
+  currentOrgId,
   onSelectFile,
 }: RightInspectorProps) {
+  const [explanationData, setExplanationData] = useState<ExplanationResponse | null>(null);
+  const [isExplaining, setIsExplaining] = useState(false);
+  const [explainError, setExplainError] = useState<string | null>(null);
+
   if (!selectedFile) {
     return (
       <aside className="flex h-full w-84 flex-col border-l border-[var(--border-subtle)] bg-[var(--bg-panel)] p-6 items-center justify-center text-center shrink-0">
@@ -60,6 +76,40 @@ export function RightInspector({
     ? KIND_COLOR_STYLES[classification.kind]
     : KIND_COLOR_STYLES.generic;
 
+  async function handleExplainFile() {
+    if (!selectedFile) return;
+    setIsExplaining(true);
+    setExplainError(null);
+
+    try {
+      const res = await fetch("/api/ai/explain", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "x-cartograph-org-id": currentOrgId,
+        },
+        body: JSON.stringify({
+          filePath: selectedFile.path,
+          repoUrl,
+          allRepoFiles: allFilePaths,
+          upstreamDependencies: outgoing.map((e) => e.to),
+          downstreamDependents: incoming.map((e) => e.from),
+        }),
+      });
+
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        throw new Error(json.error || "Failed to generate explanation.");
+      }
+
+      setExplanationData(json.data);
+    } catch (err) {
+      setExplainError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsExplaining(false);
+    }
+  }
+
   return (
     <aside className="flex h-full w-84 flex-col border-l border-[var(--border-subtle)] bg-[var(--bg-panel)] shrink-0 overflow-y-auto">
       {/* File Header */}
@@ -87,8 +137,90 @@ export function RightInspector({
         )}
       </div>
 
+      {/* AI Explanation Section */}
+      <div className="border-b border-[var(--border-subtle)] p-3 bg-[var(--bg-panel-subtle)]">
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-[var(--text-primary)]">
+            <Sparkles size={13} className="text-[var(--accent-blue)]" />
+            <span>AI EXPLANATION</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleExplainFile}
+            disabled={isExplaining}
+            className="flex items-center gap-1 rounded bg-[var(--accent-blue)] px-2 py-0.5 font-mono text-[10px] font-medium text-white hover:opacity-95 disabled:opacity-50 transition-opacity cursor-pointer shadow-xs"
+          >
+            {isExplaining ? (
+              <>
+                <Loader2 size={11} className="animate-spin" />
+                <span>Explaining...</span>
+              </>
+            ) : (
+              <span>Explain File</span>
+            )}
+          </button>
+        </div>
+
+        {explainError && (
+          <div className="rounded border border-red-500/30 bg-red-500/10 p-2 font-mono text-[10px] text-red-500">
+            {explainError}
+          </div>
+        )}
+
+        {explanationData ? (
+          <div className="space-y-2">
+            <p className="font-mono text-xs text-[var(--text-secondary)] leading-relaxed bg-[var(--bg-panel)] p-2.5 rounded border border-[var(--border-subtle)]">
+              {explanationData.explanation}
+            </p>
+
+            <div className="flex items-center justify-between text-[10px] font-mono">
+              <div className="flex items-center gap-1">
+                {explanationData.isCacheHit ? (
+                  <span className="flex items-center gap-1 text-[var(--incoming-green)] rounded bg-[var(--incoming-green-surface)] px-1.5 py-0.5 border border-[var(--incoming-green-border)]">
+                    <Database size={11} />
+                    <span>Cache Hit</span>
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1 text-[var(--accent-blue)] rounded bg-[var(--accent-blue-surface)] px-1.5 py-0.5 border border-[var(--accent-blue-border)]">
+                    <Sparkles size={11} />
+                    <span>Model Run ({explanationData.modelName})</span>
+                  </span>
+                )}
+              </div>
+
+              <div className="flex items-center gap-1">
+                {explanationData.verification.isValid ? (
+                  <span
+                    className="flex items-center gap-1 text-[var(--incoming-green)]"
+                    title={explanationData.verification.message}
+                  >
+                    <CheckCircle2 size={12} />
+                    <span>Ground Truth OK</span>
+                  </span>
+                ) : (
+                  <span
+                    className="flex items-center gap-1 text-red-500 font-semibold"
+                    title={explanationData.verification.message}
+                  >
+                    <AlertTriangle size={12} />
+                    <span>Absent File Detected</span>
+                  </span>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          !isExplaining && (
+            <div className="font-mono text-[11px] text-[var(--text-muted)] italic">
+              Click &quot;Explain File&quot; to generate an explanation grounded in real neighbours with verification.
+            </div>
+          )
+        )}
+      </div>
+
       {/* Fan Metrics Badges */}
-      <div className="grid grid-cols-2 gap-2 p-3 border-b border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)]">
+      <div className="grid grid-cols-2 gap-2 p-3 border-b border-[var(--border-subtle)]">
         <div className="rounded border border-[var(--incoming-green-border)] bg-[var(--incoming-green-surface)] p-2">
           <div className="flex items-center gap-1 font-mono text-[10px] font-semibold text-[var(--incoming-green)]">
             <ArrowDownLeft size={12} />
@@ -112,7 +244,7 @@ export function RightInspector({
         </div>
       </div>
 
-      {/* Blast Radius Section (Downstream: what breaks if this changes) */}
+      {/* Blast Radius Section */}
       <div className="p-3 border-b border-[var(--border-subtle)]">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-rose-500">
@@ -158,7 +290,7 @@ export function RightInspector({
                   key={file}
                   type="button"
                   onClick={() => onSelectFile(file)}
-                  className="flex w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] px-2 py-1 text-left hover:border-rose-500 transition-colors"
+                  className="flex w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] px-2 py-1 text-left hover:border-rose-500 transition-colors cursor-pointer"
                 >
                   <span className="truncate text-[var(--text-primary)]" title={file}>
                     {file}
@@ -179,7 +311,7 @@ export function RightInspector({
         )}
       </div>
 
-      {/* Dependency Chain Section (Upstream: what this depends on) */}
+      {/* Dependency Chain Section */}
       <div className="p-3 border-b border-[var(--border-subtle)]">
         <div className="flex items-center justify-between mb-2">
           <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-[var(--accent-blue)]">
@@ -204,7 +336,7 @@ export function RightInspector({
                   key={file}
                   type="button"
                   onClick={() => onSelectFile(file)}
-                  className="flex w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] px-2 py-1 text-left hover:border-[var(--accent-blue)] transition-colors"
+                  className="flex w-full items-center justify-between rounded border border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] px-2 py-1 text-left hover:border-[var(--accent-blue)] transition-colors cursor-pointer"
                 >
                   <span className="truncate text-[var(--text-primary)]" title={file}>
                     {file}
@@ -219,7 +351,7 @@ export function RightInspector({
         )}
       </div>
 
-      {/* External Packages imported by this file */}
+      {/* External Packages */}
       {fileExternal.length > 0 && (
         <div className="p-3 border-b border-[var(--border-subtle)]">
           <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-[var(--text-secondary)] mb-2">
@@ -239,7 +371,7 @@ export function RightInspector({
         </div>
       )}
 
-      {/* Unresolved Imports for this file */}
+      {/* Unresolved Imports */}
       {fileUnresolved.length > 0 && (
         <div className="p-3 bg-red-500/5">
           <div className="flex items-center gap-1.5 font-mono text-xs font-semibold text-red-500 mb-2">

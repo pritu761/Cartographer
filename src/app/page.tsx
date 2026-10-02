@@ -316,6 +316,9 @@ export default function HomePage() {
           edges={edges}
           unresolvedImports={unresolvedList}
           classification={selectedClassification}
+          allFilePaths={files.map((f) => f.path)}
+          repoUrl={targetPath}
+          currentOrgId={currentOrgId}
           onSelectFile={setSelectedFileId}
         />
       </div>
