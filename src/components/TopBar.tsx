@@ -17,6 +17,8 @@ interface TopBarProps {
   onSaveAnalysis: () => Promise<void>;
   savedRepos: StoredRepository[];
   onSelectSavedRepo: (repo: StoredRepository) => void;
+  isChatOpen: boolean;
+  onToggleChat: () => void;
 }
 
 export function TopBar({
@@ -31,6 +33,8 @@ export function TopBar({
   onSaveAnalysis,
   savedRepos,
   onSelectSavedRepo,
+  isChatOpen,
+  onToggleChat,
 }: TopBarProps) {
   return (
     <header className="flex h-12 w-full items-center justify-between border-b border-[var(--border-subtle)] bg-[var(--bg-panel)] px-4 shrink-0">
@@ -117,7 +121,21 @@ export function TopBar({
         )}
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleChat}
+          className={`flex items-center gap-1.5 rounded border px-2.5 py-1 font-mono text-xs font-medium transition-colors cursor-pointer ${
+            isChatOpen
+              ? "border-[var(--accent-blue)] bg-[var(--accent-blue-surface)] text-[var(--accent-blue)]"
+              : "border-[var(--border-subtle)] bg-[var(--bg-panel-subtle)] text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+          }`}
+        >
+          <span>Chat Agent</span>
+        </button>
+
+        <div className="h-4 w-[1px] bg-[var(--border-subtle)]" />
+
         <OrgSelector
           currentOrgId={currentOrgId}
           onOrgChange={onOrgChange}

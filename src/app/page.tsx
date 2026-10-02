@@ -5,6 +5,7 @@ import { TopBar } from "@/components/TopBar";
 import { LeftPanel } from "@/components/LeftPanel";
 import { CenterCanvas } from "@/components/CenterCanvas";
 import { RightInspector } from "@/components/RightInspector";
+import { ChatPanel } from "@/components/ChatPanel";
 import type { CoverageReport, DependencyEdge, ParsedFile } from "@/parser/types";
 import { classifyAllFiles } from "@/adapters";
 import { groupFilesIntoFolders } from "@/graph/folders";
@@ -21,6 +22,7 @@ export default function HomePage() {
   const [progressMessage, setProgressMessage] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [foldedFolderIds, setFoldedFolderIds] = useState<Set<string>>(new Set());
+  const [isChatOpen, setIsChatOpen] = useState(false);
 
   // Organization state
   const [currentOrgId, setCurrentOrgId] = useState("org_demo_local");
@@ -262,6 +264,8 @@ export default function HomePage() {
         onSaveAnalysis={handleSaveAnalysis}
         savedRepos={savedRepos}
         onSelectSavedRepo={handleSelectSavedRepo}
+        isChatOpen={isChatOpen}
+        onToggleChat={() => setIsChatOpen(!isChatOpen)}
       />
 
       {/* Error alert banner if any */}
@@ -322,6 +326,16 @@ export default function HomePage() {
           onSelectFile={setSelectedFileId}
         />
       </div>
+
+      {/* Grounded Repository Chat Agent Drawer */}
+      <ChatPanel
+        files={files}
+        edges={edges}
+        selectedFileId={selectedFileId}
+        onSelectFile={setSelectedFileId}
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+      />
     </div>
   );
 }
